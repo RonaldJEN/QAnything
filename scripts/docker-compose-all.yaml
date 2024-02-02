@@ -10,7 +10,7 @@ services:
       - ETCD_QUOTA_BACKEND_BYTES=4294967296
       - ETCD_SNAPSHOT_COUNT=50000
     volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/etcd:/etcd
+      - /data/milvus/volumes/etcd:/etcd
     command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
     healthcheck:
       test: ["CMD", "etcdctl", "endpoint", "health"]
@@ -24,14 +24,11 @@ services:
     environment:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
-    # ports:
-    #   - "9001:9001"
-    #       - "9000:9000"
     volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/minio:/minio_data
+      - /data/milvus/volumes/minio:/minio_data
     command: minio server /minio_data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
       interval: 30s
       timeout: 20s
       retries: 3
@@ -51,65 +48,41 @@ services:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
     volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/milvus:/var/lib/milvus
+      - /data/milvus/volumes/milvus:/var/lib/milvus
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9091/healthz"]
       interval: 30s
       start_period: 90s
       timeout: 20s
       retries: 3
-    # ports:
-    #       - "19530:19530"
-    #       - "9091:9091"
     depends_on:
       - "etcd"
       - "minio"
-
   mysql:
     container_name: mysql-container-local
     privileged: true
     image: mysql
-    #     ports:
-    #       - "3306:3306"
+    ports:
+      - "3306:3306"
     environment:
       - MYSQL_ROOT_PASSWORD=123456
     volumes:
       - qanything_mysql_data:/var/lib/mysql
-
-  qanything_local:
-    container_name: qanything-container-local
-    image: freeren/qanything-win:v1.1.1
-    # runtime: nvidia
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: "all"
-              capabilities: ["gpu"]
-    command: sh -c 'if [ "${LLM_API}" = "local" ]; then /workspace/qanything_local/scripts/run_for_local_option.sh -c $LLM_API -i $DEVICE_ID -b $RUNTIME_BACKEND -m $MODEL_NAME -t $CONV_TEMPLATE -p $TP -r $GPU_MEM_UTILI; else /workspace/qanything_local/scripts/run_for_cloud_option.sh -c $LLM_API -i $DEVICE_ID -b $RUNTIME_BACKEND; fi; while true; do sleep 5; done'
-    privileged: true
-    shm_size: '8gb'
-    volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-.}/models:/model_repos/QAEnsemble
-      - ${DOCKER_VOLUME_DIRECTORY:-.}/assets/custom_models:/model_repos/CustomLLM
-      - ${DOCKER_VOLUME_DIRECTORY:-.}/:/workspace/qanything_local/
+  attu:
+    container_name: attu-client
+    image: zilliz/attu:dev
     ports:
-      - "5052:5052"
-      - "8777:8777"
+      - "18000:3000"
+    volumes:
+      - "/data/milvus/volumes/tls:/app/tls"
     environment:
-      - NCCL_LAUNCH_MODE=PARALLEL
-      - GPUID1=${GPUID1:-0}
-      - GPUID2=${GPUID2:-0}
+      ATTU_LOG_LEVEL: info
+      MILVUS_URL: milvus-standalone-local:19530
+      SERVER_NAME: attu-server
+      ATTU_ACCESS_KEY: root
+      ATTU_SECRET_KEY: root123
     depends_on:
       - "standalone"
-      - "mysql"
-    tty: true
-    stdin_open: true
-
-volumes:
-  qanything_mysql_data:
-
 networks:
   default:
     name: qanything_milvus_mysql_local
