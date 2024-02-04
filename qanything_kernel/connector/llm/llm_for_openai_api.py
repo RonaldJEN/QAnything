@@ -10,14 +10,15 @@ import requests
 import logging
 sys.path.append("../../../")
 from qanything_kernel.connector.llm.base import (BaseAnswer, AnswerResult)
+from qanything_kernel.configs.model_config import OPENAI_API_KEY, OPENAI_API_BASE,OPENAI_API_MODEL_NAME,OPENAI_API_CONTEXT_LENGTH,SYSTEM_TEMPLATE
+import os
 
+# 添加代理
+os.environ["http_proxy"] = "http://127.0.0.1:10809"
+os.environ["https_proxy"] = "http://127.0.0.1:10809"
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_API_BASE = os.getenv("OPENAI_API_BASE")
-OPENAI_API_MODEL_NAME = os.getenv("OPENAI_API_MODEL_NAME")
-OPENAI_API_CONTEXT_LENGTH = os.getenv("OPENAI_API_CONTEXT_LENGTH")
 if isinstance(OPENAI_API_CONTEXT_LENGTH, str) and OPENAI_API_CONTEXT_LENGTH != '':
     OPENAI_API_CONTEXT_LENGTH = int(OPENAI_API_CONTEXT_LENGTH)
 logging.info(f"OPENAI_API_BASE = {OPENAI_API_BASE}")
@@ -27,7 +28,7 @@ logging.info(f"OPENAI_API_MODEL_NAME = {OPENAI_API_MODEL_NAME}")
 class OpenAILLM(BaseAnswer, ABC):
     model: str = OPENAI_API_MODEL_NAME
     token_window: int = OPENAI_API_CONTEXT_LENGTH
-    max_token: int = 512
+    max_token: int = 1000
     offcut_token: int = 50
     truncate_len: int = 50
     temperature: float = 0
@@ -131,7 +132,7 @@ class OpenAILLM(BaseAnswer, ABC):
         return num_tokens
 
     def _call(self, prompt: str, history: List[List[str]], streaming: bool=False) -> str:
-        messages = []
+        messages = [{"role": "system", "content":SYSTEM_TEMPLATE}]
         for pair in history:
             question, answer = pair
             messages.append({"role": "user", "content": question})

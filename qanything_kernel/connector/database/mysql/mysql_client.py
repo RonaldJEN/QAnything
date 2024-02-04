@@ -135,6 +135,8 @@ class KnowledgeBaseManager:
         placeholders = ','.join(['%s'] * len(kb_ids))
         query = "SELECT kb_id FROM KnowledgeBase WHERE kb_id IN ({}) AND deleted = 0 AND user_id = %s".format(
             placeholders)
+        print(kb_ids)
+        print(user_id)
         query_params = kb_ids + [user_id]
         result = self.execute_query_(query, query_params, fetch=True)
         debug_logger.info("check_kb_exist {}".format(result))

@@ -68,8 +68,8 @@ async def handle_options_request(request):
 @app.before_server_start
 async def init_local_doc_qa(app, loop):
     local_doc_qa = LocalDocQA()
-    local_doc_qa.init_cfg(mode=args.mode)
-    print(f'init local_doc_qa in {args.mode}', flush=True)
+    local_doc_qa.init_cfg(mode='local')
+    print(f'init local_doc_qa in local', flush=True)
     app.ctx.local_doc_qa = local_doc_qa
 
 
@@ -87,4 +87,4 @@ app.add_route(delete_knowledge_base, "/api/local_doc_qa/delete_knowledge_base", 
 app.add_route(rename_knowledge_base, "/api/local_doc_qa/rename_knowledge_base", methods=['POST'])  # tags=["重命名知识库"] 
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=8777, workers=10, access_log=False)
+    app.run(host='0.0.0.0', port=8777, workers=3, access_log=False)

@@ -12,7 +12,7 @@ from langchain.docstore.document import Document
 import math
 from itertools import groupby
 from typing import List
-
+from qanything_kernel.configs.model_config import OPENAI_EMBED_DIM
 
 class MilvusFailed(Exception):
     """异常基类"""
@@ -23,10 +23,7 @@ class MilvusClient:
     def __init__(self, mode, user_id, kb_ids, *, threshold=1.1, client_timeout=3):
         self.user_id = user_id
         self.kb_ids = kb_ids
-        if mode == 'local':
-            self.host = MILVUS_HOST_LOCAL
-        else:
-            self.host = MILVUS_HOST_ONLINE
+        self.host = MILVUS_HOST_LOCAL
         self.port = MILVUS_PORT
         self.client_timeout = client_timeout
         self.threshold = threshold
@@ -35,10 +32,7 @@ class MilvusClient:
         self.executor = ThreadPoolExecutor(max_workers=10)
         self.top_k = VECTOR_SEARCH_TOP_K
         self.search_params = {"metric_type": "L2", "params": {"nprobe": 256}}
-        if mode == 'local':
-            self.create_params = {"metric_type": "L2", "index_type": "IVF_FLAT", "params": {"nlist": 2048}}
-        else:
-            self.create_params = {"metric_type": "L2", "index_type": "GPU_IVF_FLAT", "params": {"nlist": 2048}}
+        self.create_params = {"metric_type": "L2", "index_type": "IVF_FLAT", "params": {"nlist": 2048}}
         self.last_init_ts = time.time() - 100  # 减去100保证最初的init不会被拒绝
         self.init()
 
@@ -51,7 +45,7 @@ class MilvusClient:
             FieldSchema(name='file_path', dtype=DataType.VARCHAR, max_length=640),
             FieldSchema(name='timestamp', dtype=DataType.VARCHAR, max_length=64),
             FieldSchema(name='content', dtype=DataType.VARCHAR, max_length=4000),
-            FieldSchema(name='embedding', dtype=DataType.FLOAT_VECTOR, dim=768)
+            FieldSchema(name='embedding', dtype=DataType.FLOAT_VECTOR, dim=1536)
         ]
         return fields
 
@@ -265,3 +259,6 @@ class MilvusClient:
                 if result is not None:
                     new_cands.extend(result)
             return new_cands
+if __name__ == '__main__':
+    milvus_kb = MilvusClient('local', 'zzp', ["KB01d1a1fc87eb4a4189d53c7006633ad4"])
+    milvus_kb.init()

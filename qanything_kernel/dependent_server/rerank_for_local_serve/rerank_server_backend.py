@@ -1,114 +1,62 @@
 import time
-from transformers import AutoTokenizer
-from copy import deepcopy
 from typing import List
-from tritonclient import grpc as grpcclient
-from qanything_kernel.configs.model_config import LOCAL_RERANK_SERVICE_URL, LOCAL_RERANK_MAX_LENGTH, LOCAL_RERANK_MODEL_NAME, \
-    LOCAL_RERANK_BATCH
+from qanything_kernel.models.gpt_loader import gpt_client
+import numpy as np
+from scipy.spatial.distance import cosine
+from qanything_kernel.configs.model_config import OPENAI_RERANK_EMBED_MODEL_NAME, OPENAI_RERANK_EMBED_BATCH
 
 
 class LocalRerankBackend:
     def __init__(self):
-        tokenizer_path = 'qanything_kernel/dependent_server/rerank_for_local_serve/reranker_model_yd_1225'
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+        self.model_name = OPENAI_RERANK_EMBED_MODEL_NAME
         self.overlap_tokens = 80
-        self.spe_id = self.tokenizer.sep_token_id
-
-        self.batch_size = LOCAL_RERANK_BATCH
-        self.max_length = LOCAL_RERANK_MAX_LENGTH
-        self.model_name = LOCAL_RERANK_MODEL_NAME
-        # 创建Triton客户端实例
-        self.triton_client = grpcclient.InferenceServerClient(url=LOCAL_RERANK_SERVICE_URL)
+        self.spe_id = 2
+        self.batch_size = OPENAI_RERANK_EMBED_BATCH
+        self.max_length = 512
 
     def inference(self, serialized_inputs):
-        # 准备输入数据
-        inputs = []
-        for input_name, data in serialized_inputs.items():
-            infer_input = grpcclient.InferInput(input_name, data.shape, grpcclient.np_to_triton_dtype(data.dtype))
-            infer_input.set_data_from_numpy(data)
-            inputs.append(infer_input)
-
-        # 准备输出
-        outputs = []
-        output_name = "logits"
-        outputs.append(grpcclient.InferRequestedOutput(output_name))
-
-        # 发送推理请求
+        # 准备输入数据：从serialized_inputs中提取文本
+        texts = [data for input_name, data in serialized_inputs.items()]
+        # 调用OpenAI Embedding API获取嵌入向量
         start_time = time.time()
-        response = self.triton_client.infer(self.model_name, inputs, outputs=outputs)
-        print('local rerank infer time: {} s'.format(time.time() - start_time), flush=True)
+        embeddings_response = gpt_client.embeddings.create(
+            input=texts,
+            model=self.model_name)
+        print('OpenAI Embedding API call time: {} s'.format(time.time() - start_time))
 
-        # 获取响应数据
-        result_data = response.as_numpy(output_name)
-        print('rerank res:', result_data, flush=True)
+        # 从响应中提取嵌入向量，并转换为NumPy数组
+        embeddings = np.array([item['embedding'] for item in embeddings_response['data']])
 
-        return result_data.reshape(-1).tolist()
+        # 模拟Triton输出格式：通常是一个具有特定名称的NumPy数组
+        # 这里我们简化处理，直接返回NumPy数组，实际使用时可能需要进一步封装以匹配特定的输出结构
+        return embeddings
 
-    def merge_inputs(self, chunk1_raw, chunk2):
-        chunk1 = deepcopy(chunk1_raw)
-        chunk1['input_ids'].extend(chunk2['input_ids'])
-        chunk1['input_ids'].append(self.spe_id)
-        chunk1['attention_mask'].extend(chunk2['attention_mask'])
-        chunk1['attention_mask'].append(chunk2['attention_mask'][0])
-        if 'token_type_ids' in chunk1:
-            token_type_ids = [1 for _ in range(len(chunk2['token_type_ids']) + 1)]
-            chunk1['token_type_ids'].extend(token_type_ids)
-        return chunk1
+    def merge_inputs(self, query_input, passage_input):
+        # 由于不再基于token操作，该方法可用于模拟兼容的结构或直接处理文本
+        # 为了简化，这里我们返回文本列表，实际不进行合并
+        # 注意：实际使用时，应根据具体逻辑调整
+        return [query_input, passage_input]
 
-    def tokenize_preproc(self,
-                         query: str,
-                         passages: List[str],
-                         ):
-        query_inputs = self.tokenizer.encode_plus(query, truncation=False, padding=False)
-        max_passage_inputs_length = self.max_length - len(query_inputs['input_ids']) - 1
-        assert max_passage_inputs_length > 10
-        overlap_tokens = min(self.overlap_tokens, max_passage_inputs_length * 2 // 7)
+    def tokenize_preproc(self, query: str, passages: List[str]):
+        # 模拟分词处理的结果，实际上将文本封装为预期的格式
+        # 这里我们直接返回文本，实际不进行分词
+        texts = []
+        for passage in passages:
+            merged_input = self.merge_inputs(query, passage)
+            # 模拟返回结构，实际上只包含文本
+            texts.append({'input_ids': merged_input, 'attention_mask': [0], 'token_type_ids': [0]})
+        return texts, list(range(len(passages)))
 
-        # 组[query, passage]对
-        merge_inputs = []
-        merge_inputs_idxs = []
-        for pid, passage in enumerate(passages):
-            passage_inputs = self.tokenizer.encode_plus(passage, truncation=False, padding=False,
-                                                        add_special_tokens=False)
-            passage_inputs_length = len(passage_inputs['input_ids'])
+    def predict(self, query: str, passages: List[str]):
+        # 准备文本列表，包括查询和所有段落
+        texts = [query] + passages
+        # 调用inference方法获取嵌入向量
+        embeddings = self.inference(texts)
+        # 计算查询嵌入向量与每个段落嵌入向量之间的相似度
+        query_embedding = embeddings[0]
+        passage_embeddings = embeddings[1:]
+        scores = [1 - cosine(query_embedding, passage_embedding) for passage_embedding in passage_embeddings]
 
-            if passage_inputs_length <= max_passage_inputs_length:
-                qp_merge_inputs = self.merge_inputs(query_inputs, passage_inputs)
-                merge_inputs.append(qp_merge_inputs)
-                merge_inputs_idxs.append(pid)
-            else:
-                start_id = 0
-                while start_id < passage_inputs_length:
-                    end_id = start_id + max_passage_inputs_length
-                    sub_passage_inputs = {k: v[start_id:end_id] for k, v in passage_inputs.items()}
-                    start_id = end_id - overlap_tokens if end_id < passage_inputs_length else end_id
-
-                    qp_merge_inputs = self.merge_inputs(query_inputs, sub_passage_inputs)
-                    merge_inputs.append(qp_merge_inputs)
-                    merge_inputs_idxs.append(pid)
-
-        return merge_inputs, merge_inputs_idxs
-
-    def predict(self,
-                query: str,
-                passages: List[str],
-                ):
-        tot_batches, merge_inputs_idxs_sort = self.tokenize_preproc(query, passages)
-
-        tot_scores = []
-        for k in range(0, len(tot_batches), self.batch_size):
-            batch = self.tokenizer.pad(
-                tot_batches[k:k + self.batch_size],
-                padding=True,
-                max_length=None,
-                pad_to_multiple_of=None,
-                return_tensors="np"
-            )
-            scores = self.inference(batch)
-            tot_scores.extend(scores)
-
-        merge_tot_scores = [0 for _ in range(len(passages))]
-        for pid, score in zip(merge_inputs_idxs_sort, tot_scores):
-            merge_tot_scores[pid] = max(merge_tot_scores[pid], score)
-        print("merge_tot_scores:", merge_tot_scores, flush=True)
-        return merge_tot_scores
+        # 打印并返回得分
+        print("Scores:", scores)
+        return scores

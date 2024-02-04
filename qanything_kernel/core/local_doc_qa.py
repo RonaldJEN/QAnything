@@ -1,10 +1,11 @@
 from qanything_kernel.configs.model_config import VECTOR_SEARCH_TOP_K, CHUNK_SIZE, VECTOR_SEARCH_SCORE_THRESHOLD, \
     PROMPT_TEMPLATE, STREAMING
 from typing import List
-from qanything_kernel.connector.embedding.embedding_for_online import YouDaoEmbeddings
-from qanything_kernel.connector.embedding.embedding_for_local import YouDaoLocalEmbeddings
 import time
-from qanything_kernel.connector.llm import OpenAILLM, ZiyueLLM
+
+from qanything_kernel.connector.embedding.embedding_for_local import YouDaoLocalEmbeddings
+from qanything_kernel.connector.llm import ZiyueLLM
+
 from langchain.schema import Document
 from qanything_kernel.connector.database.mysql.mysql_client import KnowledgeBaseManager
 from qanything_kernel.connector.database.milvus.milvus_client import MilvusClient
@@ -17,12 +18,7 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
-def _embeddings_hash(self):
-    return hash(self.model_name)
 
-
-YouDaoLocalEmbeddings.__hash__ = _embeddings_hash
-YouDaoEmbeddings.__hash__ = _embeddings_hash
 
 
 class LocalDocQA:
@@ -47,10 +43,8 @@ class LocalDocQA:
     def init_cfg(self, mode='local'):
         self.mode = mode
         self.embeddings = YouDaoLocalEmbeddings()
-        if self.mode == 'local':
-            self.llm: ZiyueLLM = ZiyueLLM()
-        else:
-            self.llm: OpenAILLM = OpenAILLM()
+        self.llm: ZiyueLLM = ZiyueLLM()
+
         self.milvus_summary = KnowledgeBaseManager(self.mode)
 
     def create_milvus_collection(self, user_id, kb_id, kb_name):
@@ -154,6 +148,7 @@ class LocalDocQA:
 
         # logging.info(f"<self.llm.token_window, self.llm.max_token, self.llm.offcut_token, query_token_num, history_token_num, template_token_num>, types = {type(self.llm.token_window), type(self.llm.max_token), type(self.llm.offcut_token), type(query_token_num), type(history_token_num), type(template_token_num)}, values = {query_token_num, history_token_num, template_token_num}")
         limited_token_nums = self.llm.token_window - self.llm.max_token - self.llm.offcut_token - query_token_num - history_token_num - template_token_num
+        print(f"limited_token_nums:{limited_token_nums}")
         new_source_docs = []
         total_token_num = 0
         for doc in source_docs:
@@ -184,11 +179,21 @@ class LocalDocQA:
         debug_logger.info(f"new_source_docs token nums: {self.llm.num_tokens_from_docs(new_source_docs)}")
         return new_source_docs
 
+    # def generate_prompt(self, query, source_docs, prompt_template):
+    #     context = "\n".join([doc.page_content for doc in source_docs])
+    #     prompt = prompt_template.replace("{question}", query).replace("{context}", context)
+    #     return prompt
     def generate_prompt(self, query, source_docs, prompt_template):
-        context = "\n".join([doc.page_content for doc in source_docs])
+        # 初始化上下文字符串
+        context = ""
+        for doc in source_docs:
+            # 从每个文档的元数据中提取文件名作为出处信息
+            source_info = doc.metadata.get('file_name', '未知来源')
+            # 将出处信息和文档内容结合，每篇文档之间用换行符分隔
+            context += f"来源: {source_info}\n{doc.page_content}\n\n"
+        # 使用查询替换模板中的{question}，上下文替换{context}
         prompt = prompt_template.replace("{question}", query).replace("{context}", context)
         return prompt
-
     def rerank_documents(self, query, source_documents):
         return self.rerank_documents_for_local(query, source_documents)
 
@@ -223,11 +228,11 @@ class LocalDocQA:
         if rerank and len(retrieval_documents) > 1:
             debug_logger.info(f"use rerank, rerank docs num: {len(retrieval_documents)}")
             retrieval_documents = self.rerank_documents(query, retrieval_documents)
-
         source_documents = self.reprocess_source_documents(query=query,
                                                            source_docs=retrieval_documents,
                                                            history=chat_history,
                                                            prompt_template=PROMPT_TEMPLATE)
+
         prompt = self.generate_prompt(query=query,
                                       source_docs=source_documents,
                                       prompt_template=PROMPT_TEMPLATE)
