@@ -12,9 +12,9 @@ echo "The rerank service is ready! (1/3)" | tee -a $log_file
 echo "rerank服务已就绪! (1/3)" | tee -a $log_file
 
 # 启动OCR服务
-#CUDA_VISIBLE_DEVICES=0 nohup python3 -u ./qanything_kernel/dependent_server/ocr_serve/ocr_server.py >> $log_file 2>&1 &
-#echo "The ocr service is ready! (2/3)" | tee -a $log_file
-#echo "OCR服务已就绪! (2/3)" | tee -a $log_file
+CUDA_VISIBLE_DEVICES=0 nohup python3 -u ./qanything_kernel/dependent_server/ocr_serve/ocr_server.py >> $log_file 2>&1 &
+echo "The ocr service is ready! (2/3)" | tee -a $log_file
+echo "OCR服务已就绪! (2/3)" | tee -a $log_file
 
 # 启动qanything后端服务
 nohup python3 -u ./qanything_kernel/qanything_server/sanic_api.py >> $log_file 2>&1 &
